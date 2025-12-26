@@ -21,7 +21,7 @@ while IFS= read -r dockerfile; do
   version=$(basename "$version_dir")
   
   # 从 Dockerfile 中提取完整的 PHP 版本号
-  php_version=$(grep -E '^\s*ENV\s+PHP_VERSION' "$dockerfile" | head -1 | awk '{print $NF}')
+  php_version=$(grep -E '^\s*ENV\s+PHP_VERSION' "$dockerfile" | head -1 | awk -F= '{print $NF}')
   
   # 如果能提取到具体版本，使用完整版本号；否则使用目录版本号
   if [ -n "$php_version" ]; then
@@ -67,13 +67,13 @@ while IFS= read -r dockerfile; do
       full_image_tag: $full_image_tag,
       short_image_tag: $short_image_tag,
       dockerfile: $dockerfile,
+      build_context: $build_context,
       os: $os,
       runs: {
         prepare: "echo \"Preparing environment for \($name)\"",
         pull: "echo \"Pulling dependencies\"",
         build: "docker build -t \($full_tag) -t \($short_tag) -f \($dockerfile) \($build_context) && docker tag \($full_tag) $REGISTRY/$GITHUB_REPOSITORY_OWNER/php:\($full_image_tag) && docker tag \($short_tag) $REGISTRY/$GITHUB_REPOSITORY_OWNER/php:\($short_image_tag) && docker push $REGISTRY/$GITHUB_REPOSITORY_OWNER/php:\($full_image_tag) && docker push $REGISTRY/$GITHUB_REPOSITORY_OWNER/php:\($short_image_tag)",
-        history: "docker history \($full_tag) || true",
-        test: "docker run --rm \($full_tag) php -v",
+        test: "docker run --rm $REGISTRY/$GITHUB_REPOSITORY_OWNER/\($full_tag) php -v",
       }
     }')
   

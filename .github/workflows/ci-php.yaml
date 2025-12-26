@@ -51,7 +51,9 @@ jobs:
       REGISTRY: ghcr.io
       GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Login to ghcr.io
@@ -65,8 +67,12 @@ jobs:
       - name: Pull Dependencies
         run: ${{ matrix.runs.pull }}
       - name: Build and Push ${{ matrix.name }}
-        run: ${{ matrix.runs.build }}
-      - name: History ${{ matrix.name }}
-        run: ${{ matrix.runs.history }}
+        uses: docker/build-push-action@v6
+        with:
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/php:${{ matrix.full_image_tag }}
+          context: ${{ github.workspace }}/${{ matrix.build_context }}
       - name: Test ${{ matrix.name }}
         run: ${{ matrix.runs.test }}

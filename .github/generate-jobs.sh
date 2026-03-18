@@ -40,44 +40,69 @@ while IFS= read -r dockerfile; do
   full_image_tag="${display_version}-${variant}-${base}"
   short_image_tag="${version}-${variant}-${base}"
   
-  # ghcr.io 完整和缩略标签
-  ghcr_full_tag="ghcr.io/\${{ github.repository_owner }}/php:${full_image_tag}"
-  ghcr_short_tag="ghcr.io/\${{ github.repository_owner }}/php:${short_image_tag}"
-  
-  # 创建矩阵条目
-  entry=$(jq -n \
-    --arg name "$name" \
+  # 为 amd64 架构创建矩阵条目
+  entry_amd64=$(jq -n \
+    --arg name "$name (amd64)" \
     --arg version "$version" \
     --arg base "$base" \
     --arg variant "$variant" \
-    --arg full_tag "$full_tag" \
-    --arg short_tag "$short_tag" \
     --arg dockerfile "$dockerfile_path" \
-    --arg os "ubuntu-latest" \
     --arg build_context "$(dirname $dockerfile_path)" \
     --arg full_image_tag "$full_image_tag" \
     --arg short_image_tag "$short_image_tag" \
+    --arg arch "linux/amd64" \
+    --arg arch_tag "amd64" \
     '{
       name: $name,
       version: $version,
       base: $base,
       variant: $variant,
-      full_tag: $full_tag,
-      short_tag: $short_tag,
       full_image_tag: $full_image_tag,
       short_image_tag: $short_image_tag,
       dockerfile: $dockerfile,
       build_context: $build_context,
-      os: $os,
+      os: "ubuntu-24.04",
+      arch: $arch,
+      arch_tag: $arch_tag,
       runs: {
         prepare: "echo \"Preparing environment for \($name)\"",
         pull: "echo \"Pulling dependencies\"",
-        build: "docker build -t \($full_tag) -t \($short_tag) -f \($dockerfile) \($build_context) && docker tag \($full_tag) $REGISTRY/$GITHUB_REPOSITORY_OWNER/php:\($full_image_tag) && docker tag \($short_tag) $REGISTRY/$GITHUB_REPOSITORY_OWNER/php:\($short_image_tag) && docker push $REGISTRY/$GITHUB_REPOSITORY_OWNER/php:\($full_image_tag) && docker push $REGISTRY/$GITHUB_REPOSITORY_OWNER/php:\($short_image_tag)",
-        test: "docker run --rm $REGISTRY/$GITHUB_REPOSITORY_OWNER/\($full_tag) php -v",
       }
     }')
   
-  include+=("$entry")
+  include+=("$entry_amd64")
+  
+  # 为 arm64 架构创建矩阵条目
+  entry_arm64=$(jq -n \
+    --arg name "$name (arm64)" \
+    --arg version "$version" \
+    --arg base "$base" \
+    --arg variant "$variant" \
+    --arg dockerfile "$dockerfile_path" \
+    --arg build_context "$(dirname $dockerfile_path)" \
+    --arg full_image_tag "$full_image_tag" \
+    --arg short_image_tag "$short_image_tag" \
+    --arg arch "linux/arm64" \
+    --arg arch_tag "arm64" \
+    '{
+      name: $name,
+      version: $version,
+      base: $base,
+      variant: $variant,
+      full_image_tag: $full_image_tag,
+      short_image_tag: $short_image_tag,
+      dockerfile: $dockerfile,
+      build_context: $build_context,
+      os: "ubuntu-24.04-arm",
+      arch: $arch,
+      arch_tag: $arch_tag,
+      runs: {
+        prepare: "echo \"Preparing environment for \($name)\"",
+        pull: "echo \"Pulling dependencies\"",
+      }
+    }')
+  
+  include+=("$entry_arm64")
 done < <(find . -name "Dockerfile" -type f | grep -E '[0-9]+\.[0-9]+' | sort)
 
 # 生成最终的 strategy JSON

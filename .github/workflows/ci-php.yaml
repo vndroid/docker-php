@@ -31,7 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - id: generate-jobs
-        name: Generate Jobs
+        name: Generate jobs
         run: |
           bash .github/generate-jobs.sh > strategy.json
           strategy=$(cat strategy.json)
@@ -52,27 +52,149 @@ jobs:
       GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
     steps:
       - uses: actions/checkout@v5
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
       - name: Login to ghcr.io
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Prepare Environment
+      - name: Prepare environment
         run: ${{ matrix.runs.prepare }}
-      - name: Pull Dependencies
+      - name: Pull dependencies
         run: ${{ matrix.runs.pull }}
       - name: Build and Push ${{ matrix.name }}
-        uses: docker/build-push-action@v6
-        with:
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/php:${{ matrix.full_image_tag }}
-          context: ${{ github.workspace }}/${{ matrix.build_context }}
+        run: |
+          docker build \
+            --platform ${{ matrix.arch }} \
+            -t ${{ env.REGISTRY }}/${{ github.repository_owner }}/php:${{ matrix.full_image_tag }}-${{ matrix.arch_tag }} \
+            -t ${{ env.REGISTRY }}/${{ github.repository_owner }}/php:${{ matrix.short_image_tag }}-${{ matrix.arch_tag }} \
+            -f ${{ github.workspace }}/${{ matrix.dockerfile }} \
+            ${{ github.workspace }}/${{ matrix.build_context }}
+          
+          docker push ${{ env.REGISTRY }}/${{ github.repository_owner }}/php:${{ matrix.full_image_tag }}-${{ matrix.arch_tag }}
+          docker push ${{ env.REGISTRY }}/${{ github.repository_owner }}/php:${{ matrix.short_image_tag }}-${{ matrix.arch_tag }}
       - name: Test ${{ matrix.name }}
-        run: ${{ matrix.runs.test }}
+        run: |
+          docker run --rm --platform ${{ matrix.arch }} \
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/php:${{ matrix.full_image_tag }}-${{ matrix.arch_tag }} \
+            php -v
+
+  merge:
+    name: Create and Push Multi-Arch Manifest
+    runs-on: ubuntu-24.04
+    needs: test
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: Login to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Generate unique image combinations
+        id: images
+        run: |
+          bash .github/generate-jobs.sh > strategy.json
+          
+          # 提取唯一的镜像组合（去除架构后缀）
+          unique_images=$(jq -r '.include[] | "\(.full_image_tag),\(.short_image_tag)"' strategy.json | sort -u)
+          
+          # 将结果格式化为 JSON 数组
+          images_json=$(jq -R -s -c 'split("\n") | map(select(length > 0) | split(",") | {full: .[0], short: .[1]})' <<<"$unique_images")
+          
+          EOF="EOF-$RANDOM-$RANDOM-$RANDOM"
+          echo "images<<$EOF" >> "$GITHUB_OUTPUT"
+          echo "$images_json" >> "$GITHUB_OUTPUT"
+          echo "$EOF" >> "$GITHUB_OUTPUT"
+      - name: Create and Push Multi-Arch manifests
+        env:
+          REGISTRY: ${{ env.REGISTRY }}
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: |
+          images='${{ steps.images.outputs.images }}'
+          
+          echo "$images" | jq -c '.[]' | while read -r img; do
+            full_tag=$(echo "$img" | jq -r '.full')
+            short_tag=$(echo "$img" | jq -r '.short')
+            
+            echo "Creating manifest for: $full_tag"
+            
+            # 创建和推送完整版本标签的 manifest
+            docker manifest create \
+              $REGISTRY/$REPO_OWNER/php:$full_tag \
+              $REGISTRY/$REPO_OWNER/php:$full_tag-amd64 \
+              $REGISTRY/$REPO_OWNER/php:$full_tag-arm64
+            
+            docker manifest push $REGISTRY/$REPO_OWNER/php:$full_tag
+            
+            # 创建和推送缩略版本标签的 manifest（如果与完整版本不同）
+            if [ "$full_tag" != "$short_tag" ]; then
+              echo "Creating manifest for: $short_tag"
+              docker manifest create \
+                $REGISTRY/$REPO_OWNER/php:$short_tag \
+                $REGISTRY/$REPO_OWNER/php:$full_tag-amd64 \
+                $REGISTRY/$REPO_OWNER/php:$full_tag-arm64
+              
+              docker manifest push $REGISTRY/$REPO_OWNER/php:$short_tag
+            fi
+          done
+
+  cleanup:
+    name: Cleanup Obsoleting Tags
+    runs-on: ubuntu-slim
+    needs: merge
+    permissions:
+      packages: write
+    outputs:
+      pkg_name: ${{ steps.parse.outputs.pkg_name }}
+    steps:
+      - name: Get package name
+        id: parse
+        shell: bash
+        run: |
+          REPO_NAME="${GITHUB_REPOSITORY##*/}"
+          PKG_NAME="${REPO_NAME##*-}"
+          if [ -z "$PKG_NAME" ] ; then
+            echo "$PKG_NAME Empty"
+            exit 1
+          fi
+          echo "PACKAGE='${PKG_NAME}'"
+          echo "pkg_name=${PKG_NAME}" >> $GITHUB_OUTPUT
+      - name: Delete intermediate architecture tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          OWNER=${{ github.repository_owner }}
+          IMAGE=${{ steps.parse.outputs.pkg_name }}
+          
+          for ARCH in amd64 arm64; do
+            echo "Deleting tags ending with: -$ARCH"
+            
+            VERSIONS=$(gh api -H "Accept: application/vnd.github+json" \
+              /users/$OWNER/packages/container/$IMAGE/versions \
+              --paginate --jq ".[] | select(.metadata.container.tags[]? | endswith(\"-$ARCH\")) | .id" | sort -u)
+            
+            if [ -z "$VERSIONS" ]; then
+              echo "No versions found with suffix -$ARCH"
+              continue
+            fi
+            
+            while IFS= read -r VERSION_ID; do
+              if [ -n "$VERSION_ID" ]; then
+                echo "Deleting version $VERSION_ID with architecture tag -$ARCH"
+                gh api \
+                  --method DELETE \
+                  -H "Accept: application/vnd.github+json" \
+                  /users/$OWNER/packages/container/$IMAGE/versions/$VERSION_ID
+              fi
+            done <<< "$VERSIONS"
+          done
+      - name: Cleanup untagged images
+        uses: dataaxiom/ghcr-cleanup-action@v1
+        with:
+          delete-untagged: true
+          owner: ${{ github.repository_owner }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          package: ${{ steps.parse.outputs.pkg_name }}

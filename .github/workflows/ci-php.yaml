@@ -1,0 +1,72 @@
+name: CI Build PHP
+
+on:
+  push:
+  workflow_dispatch:
+  schedule:
+    - cron: 0 0 * * 0
+
+defaults:
+  run:
+    shell: 'bash -Eeuo pipefail -x {0}'
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+
+  generate-jobs:
+    name: Generate Jobs
+    runs-on: ubuntu-latest
+    outputs:
+      strategy: ${{ steps.generate-jobs.outputs.strategy }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: generate-jobs
+        name: Generate Jobs
+        run: |
+          bash .github/generate-jobs.sh > strategy.json
+          strategy=$(cat strategy.json)
+
+          EOF="EOF-$RANDOM-$RANDOM-$RANDOM"
+          echo "strategy<<$EOF" >> "$GITHUB_OUTPUT"
+          jq <<<"$strategy" . | tee -a "$GITHUB_OUTPUT"
+          echo "$EOF" >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: generate-jobs
+    strategy:
+      matrix: ${{ fromJson(needs.generate-jobs.outputs.strategy) }}
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    env:
+      REGISTRY: ghcr.io
+      GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Prepare Environment
+        run: ${{ matrix.runs.prepare }}
+      - name: Pull Dependencies
+        run: ${{ matrix.runs.pull }}
+      - name: Build and Push ${{ matrix.name }}
+        run: ${{ matrix.runs.build }}
+      - name: History ${{ matrix.name }}
+        run: ${{ matrix.runs.history }}
+      - name: Test ${{ matrix.name }}
+        run: ${{ matrix.runs.test }}

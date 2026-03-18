@@ -45,6 +45,7 @@ jobs:
           # echo results
           echo "Base OS: '${OS_NME}'-'${OS_VER}'"
           echo "Artifacts: '${AF_NME}'-'${AF_VER}'"
+          echo "Directory: '${AF_DIR}'"
           # set outputs
           echo "af_dir=${AF_DIR}" >> $GITHUB_OUTPUT
           echo "os_nme=${OS_NME}" >> $GITHUB_OUTPUT

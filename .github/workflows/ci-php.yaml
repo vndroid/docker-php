@@ -90,6 +90,10 @@ jobs:
           file: ./${{ needs.prepare.outputs.af_dir }}/Dockerfile
           push: true
           tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.pd_nme }}:${{ steps.normalize.outputs.arch_tag }}
+      - name: Test Image (${{ matrix.arch }})
+        run: |
+          docker run --rm ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.pd_nme }}:${{ steps.normalize.outputs.arch_tag }} \
+          php -v
   merge:
     name: Create and Push Multi-Arch Manifest
     runs-on: ubuntu-24.04
@@ -108,7 +112,7 @@ jobs:
       - name: Create and Push Manifest linux/amd64, linux/arm64
         run: |
           docker buildx imagetools create \
-            --tag ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.pd_nme }}:${{ needs.prepare.outputs.pd_ver }}-${{ env.BASE_IMAGE }}${{ needs.prepare.outputs.os_ver }} \
+            --tag ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.pd_nme }}:${{ needs.prepare.outputs.pd_ver }}-fpm-${{ env.BASE_IMAGE }}${{ needs.prepare.outputs.os_ver }} \
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.pd_nme }}:amd64 \
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.pd_nme }}:arm64
   cleanup:

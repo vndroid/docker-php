@@ -15,14 +15,14 @@ jobs:
     permissions:
       contents: read
     outputs:
-      af_dir: ${{ steps.parse.outputs.af_dir }}
-      os_nme: ${{ steps.parse.outputs.os_nme }}
-      os_ver: ${{ steps.parse.outputs.os_ver }}
-      pd_nme: ${{ steps.parse.outputs.pd_nme }}
-      pd_ver: ${{ steps.parse.outputs.pd_ver }}
+      au_dirs: ${{ steps.parse.outputs.au_dirs }}
+      os_name: ${{ steps.parse.outputs.os_name }}
+      os_vers: ${{ steps.parse.outputs.os_vers }}
+      au_name: ${{ steps.parse.outputs.au_name }}
+      au_vers: ${{ steps.parse.outputs.au_vers }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: Parse ARGs from Repository
         id: parse
         shell: bash
@@ -47,11 +47,11 @@ jobs:
           echo "Artifacts: '${AF_NME}'-'${AF_VER}'"
           echo "Directory: '${AF_DIR}'"
           # set outputs
-          echo "af_dir=${AF_DIR}" >> $GITHUB_OUTPUT
-          echo "os_nme=${OS_NME}" >> $GITHUB_OUTPUT
-          echo "os_ver=${OS_VER}" >> $GITHUB_OUTPUT
-          echo "pd_nme=${AF_NME}" >> $GITHUB_OUTPUT
-          echo "pd_ver=${AF_VER}" >> $GITHUB_OUTPUT
+          echo "au_dirs=${AF_DIR}" >> $GITHUB_OUTPUT
+          echo "os_name=${OS_NME}" >> $GITHUB_OUTPUT
+          echo "os_vers=${OS_VER}" >> $GITHUB_OUTPUT
+          echo "au_name=${AF_NME}" >> $GITHUB_OUTPUT
+          echo "au_vers=${AF_VER}" >> $GITHUB_OUTPUT
   build:
     name: Build and Push (${{ matrix.arch }})
     permissions:
@@ -68,11 +68,11 @@ jobs:
     needs: prepare
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       - name: Login to ghcr.io
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.repository_owner }}
@@ -84,15 +84,17 @@ jobs:
           echo "${ARCH_TAG}"
           echo "arch_tag=${ARCH_TAG}" >> $GITHUB_OUTPUT
       - name: Build and Push Image (${{ matrix.arch }})
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
-          context: ./${{ needs.prepare.outputs.af_dir }}/
-          file: ./${{ needs.prepare.outputs.af_dir }}/Dockerfile
+          context: ./${{ needs.prepare.outputs.au_dirs }}/
+          file: ./${{ needs.prepare.outputs.au_dirs }}/Dockerfile
           push: true
-          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.pd_nme }}:${{ steps.normalize.outputs.arch_tag }}
+          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.au_name }}:${{ steps.normalize.outputs.arch_tag }}
+          cache-from: type=gha,scope=${{ needs.prepare.outputs.au_name }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ needs.prepare.outputs.au_name }}-${{ matrix.arch }}
       - name: Test Image (${{ matrix.arch }})
         run: |
-          docker run --rm ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.pd_nme }}:${{ steps.normalize.outputs.arch_tag }} \
+          docker run --rm ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.au_name }}:${{ steps.normalize.outputs.arch_tag }} \
           php -v
   merge:
     name: Create and Push Multi-Arch Manifest
@@ -104,7 +106,7 @@ jobs:
       packages: write
     steps:
       - name: Login to ghcr.io
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.repository_owner }}
@@ -112,9 +114,9 @@ jobs:
       - name: Create and Push Manifest linux/amd64, linux/arm64
         run: |
           docker buildx imagetools create \
-            --tag ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.pd_nme }}:${{ needs.prepare.outputs.pd_ver }}-fpm-${{ env.BASE_IMAGE }}${{ needs.prepare.outputs.os_ver }} \
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.pd_nme }}:amd64 \
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.pd_nme }}:arm64
+            --tag ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.au_name }}:${{ needs.prepare.outputs.au_vers }}-fpm-${{ env.BASE_IMAGE }}${{ needs.prepare.outputs.os_vers }} \
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.au_name }}:amd64 \
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.au_name }}:arm64
   cleanup:
     name: Cleanup Obsoleting Tags
     runs-on: ubuntu-slim
@@ -130,7 +132,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           OWNER=${{ github.repository_owner }}
-          IMAGE=${{ needs.prepare.outputs.pd_nme }}
+          IMAGE=${{ needs.prepare.outputs.au_name }}
           for TAG in amd64 arm64; do
             VERSION_ID=$(gh api -H "Accept: application/vnd.github+json" \
               /users/$OWNER/packages/container/$IMAGE/versions \
@@ -149,4 +151,4 @@ jobs:
           delete-untagged: true
           owner: ${{ github.repository_owner }}
           token: ${{ secrets.GITHUB_TOKEN }}
-          package: ${{ needs.prepare.outputs.pd_nme }}
+          package: ${{ needs.prepare.outputs.au_name }}

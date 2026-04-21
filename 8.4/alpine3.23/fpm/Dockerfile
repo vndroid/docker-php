@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.23.0
 FROM alpine:3.23
 
 # dependencies required for running "phpize"

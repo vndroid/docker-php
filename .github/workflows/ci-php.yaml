@@ -2,12 +2,12 @@ name: CI Build PHP
 on:
   push:
     branches: ['main']
-    paths-ignore:
-      - '.github/workflows/**'
+    paths:
+      - '[0-9].*/**'
   workflow_dispatch:
 env:
-  REGISTRY: ghcr.io
-  BASE_IMAGE: alpine
+  REGISTRY: 'ghcr.io'
+  BASE_IMAGE: 'alpine'
 jobs:
   prepare:
     name: Parse ARGs

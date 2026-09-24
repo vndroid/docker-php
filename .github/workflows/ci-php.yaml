@@ -61,9 +61,9 @@ jobs:
       matrix:
         include:
           - arch: linux/amd64
-            runs-on: ubuntu-24.04
+            runs-on: ubuntu-26.04
           - arch: linux/arm64
-            runs-on: ubuntu-24.04-arm
+            runs-on: ubuntu-26.04-arm
     runs-on: ${{ matrix.runs-on }}
     needs: prepare
     steps:
@@ -98,7 +98,7 @@ jobs:
           php -v
   merge:
     name: Create and Push Multi-Arch Manifest
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: 
       - prepare
       - build
